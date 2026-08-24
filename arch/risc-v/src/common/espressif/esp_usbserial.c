@@ -624,6 +624,21 @@ static int esp_ioctl(struct file *filep, int cmd, unsigned long arg)
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: esp_usbserial_connected
+ *
+ * Description:
+ *   Poll USB SOF state without writing data or changing the driver's open
+ *   lifecycle.  A late-opening console can use this to refresh its
+ *   SERIAL_REMOVABLE state before calling open().
+ *
+ ****************************************************************************/
+
+bool esp_usbserial_connected(void)
+{
+  return esp_connected(&g_usbserial_priv);
+}
+
+/****************************************************************************
  * Name: esp_usbserial_write
  *
  * Description:
