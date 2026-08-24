@@ -481,17 +481,13 @@ static int esp_ioctl(struct file *filep, int cmd, unsigned long arg)
 
 void esp_usbserial_write(char ch)
 {
-  /* USB-Serial/JTAG stops draining its small TX FIFO when no host has the
-   * port open.  The low-level console path must never wait indefinitely:
-   * a late syslog call would otherwise freeze an otherwise healthy system.
-   * Drop the character while disconnected/full; normal interrupt-driven
-   * /dev/console writes retain their usual buffering semantics.
+  /* Do not submit low-level console bytes to USB Serial/JTAG.  ESP32-P4 has
+   * no reliable indication that a host terminal has opened this endpoint.
+   * Submitting even a partial packet while no host is listening can leave
+   * the endpoint interrupt active and interfere with other interrupt-driven
+   * devices during boot.  The normal interrupt-driven /dev/console path is
+   * unaffected, so NSH remains available after the serial driver starts.
    */
 
-  if (!esp_txready(&g_uart_usbserial))
-    {
-      return;
-    }
-
-  esp_send(&g_uart_usbserial, ch);
+  return;
 }
