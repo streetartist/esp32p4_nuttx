@@ -38,6 +38,7 @@
 #endif
 
 #include <nuttx/arch.h>
+#include <nuttx/clock.h>
 #include <nuttx/irq.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/serial/serial.h>
@@ -66,6 +67,12 @@
 
 #define ESP_USBCDC_BUFFERSIZE 64
 
+/* A connected full-speed USB host emits one SOF packet every millisecond.
+ * Allow a generous scheduling margin before declaring the host absent.
+ */
+
+#define ESP_USBSERIAL_SOF_GRACE_TICKS (MSEC2TICK(20) + 1)
+
 /****************************************************************************
  * Private Types
  ****************************************************************************/
@@ -75,6 +82,8 @@ struct esp_priv_s
   const uint8_t  source;        /* Source ID */
   const uint8_t  irq;           /* IRQ number assigned to the source */
   int            cpuint;        /* CPU interrupt assigned */
+  clock_t        last_sof;      /* Last observed USB start-of-frame */
+  bool           connected;     /* Host is actively producing SOFs */
 };
 
 /****************************************************************************
@@ -82,6 +91,7 @@ struct esp_priv_s
  ****************************************************************************/
 
 static int esp_interrupt(int irq, void *context, void *arg);
+static bool esp_connected(struct esp_priv_s *priv);
 
 /* Serial driver methods */
 
@@ -109,6 +119,8 @@ static struct esp_priv_s g_usbserial_priv =
   .source = ETS_USB_SERIAL_JTAG_INTR_SOURCE,
   .irq    = ESP_SOURCE2IRQ(ETS_USB_SERIAL_JTAG_INTR_SOURCE),
   .cpuint = -ENOMEM,
+  .last_sof = 0,
+  .connected = false,
 };
 
 static struct uart_ops_s g_uart_ops =
@@ -157,6 +169,67 @@ uart_dev_t g_uart_usbserial =
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: esp_connected
+ *
+ * Description:
+ *   Track host presence using USB SOF packets, following Espressif's
+ *   connection monitor.  FIFO writability alone is insufficient: after a
+ *   packet is committed with no host, the endpoint remains permanently
+ *   non-writable and a blocking console writer can stop the system.
+ ****************************************************************************/
+
+static bool esp_connected(struct esp_priv_s *priv)
+{
+  irqstate_t flags;
+  clock_t now;
+  bool connected;
+
+  now = clock_systime_ticks();
+  flags = enter_critical_section();
+
+  if ((usb_serial_jtag_ll_get_intraw_mask() &
+       USB_SERIAL_JTAG_INTR_SOF) != 0)
+    {
+      usb_serial_jtag_ll_clr_intsts_mask(USB_SERIAL_JTAG_INTR_SOF);
+      priv->last_sof = now;
+      priv->connected = true;
+    }
+  else if (priv->connected &&
+           (clock_t)(now - priv->last_sof) >
+           ESP_USBSERIAL_SOF_GRACE_TICKS)
+    {
+      priv->connected = false;
+    }
+
+  connected = priv->connected;
+
+  /* With no host, shut down both console data interrupt sources.  Keep only
+   * SOF armed so the first frame from a newly attached host can wake the
+   * driver and restore the console automatically.
+   */
+
+  if (priv->cpuint >= 0)
+    {
+      if (connected)
+        {
+          usb_serial_jtag_ll_disable_intr_mask(USB_SERIAL_JTAG_INTR_SOF);
+          usb_serial_jtag_ll_ena_intr_mask(
+            USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT);
+        }
+      else
+        {
+          usb_serial_jtag_ll_disable_intr_mask(
+            USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY |
+            USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT);
+          usb_serial_jtag_ll_ena_intr_mask(USB_SERIAL_JTAG_INTR_SOF);
+        }
+    }
+
+  leave_critical_section(flags);
+  return connected;
+}
+
+/****************************************************************************
  * Name: esp_interrupt
  *
  * Description:
@@ -171,7 +244,22 @@ uart_dev_t g_uart_usbserial =
 static int esp_interrupt(int irq, void *context, void *arg)
 {
   struct uart_dev_s *dev = (struct uart_dev_s *)arg;
+  struct esp_priv_s *priv = dev->priv;
   uint32_t int_status = usb_serial_jtag_ll_get_intsts_mask();
+
+  /* A disconnected driver enables only SOF.  The first frame proves that a
+   * host is present; switch back to the normal console interrupt sources.
+   */
+
+  if ((int_status & USB_SERIAL_JTAG_INTR_SOF) != 0)
+    {
+      usb_serial_jtag_ll_clr_intsts_mask(USB_SERIAL_JTAG_INTR_SOF);
+      priv->last_sof = clock_systime_ticks();
+      priv->connected = true;
+      usb_serial_jtag_ll_disable_intr_mask(USB_SERIAL_JTAG_INTR_SOF);
+      usb_serial_jtag_ll_ena_intr_mask(
+        USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT);
+    }
 
   /* Send buffer has room and can accept new data. */
 
@@ -229,17 +317,37 @@ static void esp_shutdown(struct uart_dev_s *dev)
 
 static void esp_txint(struct uart_dev_s *dev, bool enable)
 {
-  usb_serial_jtag_ll_txfifo_flush();
+  struct esp_priv_s *priv = dev->priv;
 
   if (enable)
     {
-      usb_serial_jtag_ll_ena_intr_mask(
-        USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
+      if (esp_connected(priv))
+        {
+          usb_serial_jtag_ll_txfifo_flush();
+          usb_serial_jtag_ll_ena_intr_mask(
+            USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
+        }
+      else
+        {
+          /* A console write must never wait for a USB host.  Make txready()
+           * report ready and synchronously consume the software queue;
+           * esp_send() discards its bytes while disconnected.
+           */
+
+          usb_serial_jtag_ll_disable_intr_mask(
+            USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
+          uart_xmitchars(dev);
+        }
     }
   else
     {
       usb_serial_jtag_ll_disable_intr_mask(
         USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
+
+      if (esp_connected(priv))
+        {
+          usb_serial_jtag_ll_txfifo_flush();
+        }
     }
 }
 
@@ -253,10 +361,21 @@ static void esp_txint(struct uart_dev_s *dev, bool enable)
 
 static void esp_rxint(struct uart_dev_s *dev, bool enable)
 {
+  struct esp_priv_s *priv = dev->priv;
+
   if (enable)
     {
-      usb_serial_jtag_ll_ena_intr_mask(
-        USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT);
+      if (esp_connected(priv))
+        {
+          usb_serial_jtag_ll_ena_intr_mask(
+            USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT);
+        }
+      else
+        {
+          usb_serial_jtag_ll_disable_intr_mask(
+            USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT);
+          usb_serial_jtag_ll_ena_intr_mask(USB_SERIAL_JTAG_INTR_SOF);
+        }
     }
   else
     {
@@ -294,8 +413,6 @@ static int esp_attach(struct uart_dev_s *dev)
 
   usb_serial_jtag_ll_phy_set_defaults();
 
-  usb_serial_jtag_ll_ena_intr_mask(USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT);
-
   /* Try to attach the IRQ to a CPU int */
 
   priv->cpuint = esp_setup_irq(priv->source,
@@ -313,6 +430,16 @@ static int esp_attach(struct uart_dev_s *dev)
   if (priv->cpuint >= 0)
     {
       up_enable_irq(priv->irq);
+
+      if (esp_connected(priv))
+        {
+          usb_serial_jtag_ll_ena_intr_mask(
+            USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT);
+        }
+      else
+        {
+          usb_serial_jtag_ll_ena_intr_mask(USB_SERIAL_JTAG_INTR_SOF);
+        }
     }
   else
     {
@@ -368,6 +495,13 @@ static bool esp_rxavailable(struct uart_dev_s *dev)
 
 static bool esp_txready(struct uart_dev_s *dev)
 {
+  struct esp_priv_s *priv = dev->priv;
+
+  if (!esp_connected(priv))
+    {
+      return true;
+    }
+
   return (bool)usb_serial_jtag_ll_txfifo_writable();
 }
 
@@ -381,6 +515,13 @@ static bool esp_txready(struct uart_dev_s *dev)
 
 static void esp_send(struct uart_dev_s *dev, int ch)
 {
+  struct esp_priv_s *priv = dev->priv;
+
+  if (!esp_connected(priv))
+    {
+      return;
+    }
+
   /* Write the character to the buffer. */
 
   uint8_t buf[1] = {
@@ -481,13 +622,17 @@ static int esp_ioctl(struct file *filep, int cmd, unsigned long arg)
 
 void esp_usbserial_write(char ch)
 {
-  /* Do not submit low-level console bytes to USB Serial/JTAG.  ESP32-P4 has
-   * no reliable indication that a host terminal has opened this endpoint.
-   * Submitting even a partial packet while no host is listening can leave
-   * the endpoint interrupt active and interfere with other interrupt-driven
-   * devices during boot.  The normal interrupt-driven /dev/console path is
-   * unaffected, so NSH remains available after the serial driver starts.
+  uint8_t byte = (uint8_t)ch;
+
+  /* Low-level logging is best-effort but never blocking.  SOF monitoring
+   * prevents committing a packet when no host is present; FIFO readiness
+   * prevents waiting when a connected host is temporarily behind.
    */
 
-  return;
+  if (esp_connected(&g_usbserial_priv) &&
+      usb_serial_jtag_ll_txfifo_writable())
+    {
+      usb_serial_jtag_ll_write_txfifo(&byte, 1);
+      usb_serial_jtag_ll_txfifo_flush();
+    }
 }
