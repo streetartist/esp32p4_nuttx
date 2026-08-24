@@ -1,0 +1,80 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+menuconfig THERMAL
+	bool "Thermal framework"
+	default n
+	depends on SCHED_LPWORK
+	---help---
+		Enable thermal framework.
+
+if THERMAL
+
+config THERMAL_DEFAULT_GOVERNOR
+	string "Thermal default governor name"
+	default "step_wise"
+	---help---
+		Default governor name.
+
+config THERMAL_GOVERNOR_STEP_WISE
+	bool "Enable step wise governor"
+	default y
+	---help---
+		Enable step wise governor.
+
+config THERMAL_CDEV_DEVFREQ
+	bool "Thermal devfreq cooling device"
+	default n
+	depends on DEVFREQ
+	---help---
+		Enable thermal devfreq cooling device, which cools a device by
+		capping the frequency of its devfreq instance.
+
+if THERMAL_CDEV_DEVFREQ
+
+config THERMAL_CDEV_DEVFREQ_NAME
+	string "Name of the devfreq device to cool"
+	default "cpu"
+	---help---
+		The devfreq device this cooling device caps, and the name the
+		cooling device itself takes, so that a zone's cooling map can
+		refer to it.  The devfreq device must be registered before
+		thermal_init() runs.
+
+endif # THERMAL_CDEV_DEVFREQ
+
+config THERMAL_PROCFS
+	bool "Thermal PROCFS support"
+	default n
+	depends on FS_PROCFS
+	---help---
+		Enable thermal procfs.
+
+config THERMAL_DUMMY
+	bool "Thermal dummy driver"
+	default n
+	---help---
+		Enable thermal dummy driver.
+
+if THERMAL_DUMMY
+
+config THERMAL_DUMMY_POLLING_DELAY
+	int "Polling delay"
+	default 200
+	---help---
+		Polling delay(tick).
+
+config THERMAL_DUMMY_DEVFREQ
+	bool "Dummy devfreq driver"
+	default n
+	depends on DEVFREQ
+	select THERMAL_CDEV_DEVFREQ
+	---help---
+		Enable devfreq dummy driver, giving the dummy zone a frequency
+		capped cooling device as well as its fan.
+
+endif # THERMAL_DUMMY
+
+endif # THERMAL
