@@ -42,6 +42,7 @@
 #include <nuttx/irq.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/serial/serial.h>
+#include <nuttx/wdog.h>
 #include <arch/irq.h>
 
 #include "riscv_internal.h"
@@ -73,6 +74,12 @@
 
 #define ESP_USBSERIAL_SOF_GRACE_TICKS (MSEC2TICK(20) + 1)
 
+/* Once a host has proved that it is consuming the serial endpoint, allow
+ * normal buffered output but bound any later stall caused by closing it.
+ */
+
+#define ESP_USBSERIAL_TX_STALL_TICKS (MSEC2TICK(20) + 1)
+
 /****************************************************************************
  * Private Types
  ****************************************************************************/
@@ -84,6 +91,9 @@ struct esp_priv_s
   int            cpuint;        /* CPU interrupt assigned */
   clock_t        last_sof;      /* Last observed USB start-of-frame */
   bool           connected;     /* Host is actively producing SOFs */
+  bool           host_active;   /* Host proved it consumes serial packets */
+  bool           drop_tx;       /* Discard while recovering a TX stall */
+  struct wdog_s  tx_wdog;       /* Bound a closed host's back-pressure */
 };
 
 /****************************************************************************
@@ -92,6 +102,7 @@ struct esp_priv_s
 
 static int esp_interrupt(int irq, void *context, void *arg);
 static bool esp_connected(struct esp_priv_s *priv);
+static void esp_tx_stall(wdparm_t arg);
 
 /* Serial driver methods */
 
@@ -230,6 +241,37 @@ static bool esp_connected(struct esp_priv_s *priv)
 }
 
 /****************************************************************************
+ * Name: esp_tx_stall
+ *
+ * Description:
+ *   A received byte or completed IN packet proves that a process is using
+ *   the host serial endpoint.  If that host later stops consuming packets,
+ *   release every blocked console writer and return to lossy output.
+ ****************************************************************************/
+
+static void esp_tx_stall(wdparm_t arg)
+{
+  struct uart_dev_s *dev = (struct uart_dev_s *)(uintptr_t)arg;
+  struct esp_priv_s *priv = dev->priv;
+
+  if (dev->xmit.head != dev->xmit.tail)
+    {
+      priv->host_active = false;
+      priv->drop_tx = true;
+      uart_xmitchars(dev);
+      priv->drop_tx = false;
+    }
+
+  /* IN_EMPTY can also be left behind by a flasher or ROM output and is not
+   * proof that a serial application is open.  Only received host data may
+   * reactivate normal TX.
+   */
+
+  usb_serial_jtag_ll_disable_intr_mask(
+    USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
+}
+
+/****************************************************************************
  * Name: esp_interrupt
  *
  * Description:
@@ -267,7 +309,12 @@ static int esp_interrupt(int irq, void *context, void *arg)
     {
       usb_serial_jtag_ll_clr_intsts_mask(
         USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
-      uart_xmitchars(dev);
+      wd_cancel(&priv->tx_wdog);
+
+      if (priv->host_active)
+        {
+          uart_xmitchars(dev);
+        }
     }
 
   /* Data from the host are available to read. */
@@ -276,6 +323,9 @@ static int esp_interrupt(int irq, void *context, void *arg)
     {
       usb_serial_jtag_ll_clr_intsts_mask(
         USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT);
+      priv->host_active = true;
+      usb_serial_jtag_ll_ena_intr_mask(
+        USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
       uart_recvchars(dev);
     }
 
@@ -321,32 +371,52 @@ static void esp_txint(struct uart_dev_s *dev, bool enable)
 
   if (enable)
     {
-      if (esp_connected(priv))
+      if (priv->host_active)
         {
           usb_serial_jtag_ll_txfifo_flush();
           usb_serial_jtag_ll_ena_intr_mask(
             USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
+          wd_start(&priv->tx_wdog, ESP_USBSERIAL_TX_STALL_TICKS,
+                   esp_tx_stall, (wdparm_t)(uintptr_t)dev);
         }
       else
         {
-          /* A console write must never wait for a USB host.  Make txready()
-           * report ready and synchronously consume the software queue;
-           * esp_send() discards its bytes while disconnected.
+          /* Before the host proves that it is consuming packets, output
+           * must be lossy so boot and the desktop can never be blocked.
            */
 
-          usb_serial_jtag_ll_disable_intr_mask(
-            USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
+          priv->drop_tx = true;
           uart_xmitchars(dev);
+          priv->drop_tx = false;
         }
     }
   else
     {
-      usb_serial_jtag_ll_disable_intr_mask(
-        USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
+      wd_cancel(&priv->tx_wdog);
 
-      if (esp_connected(priv))
+      if (!priv->host_active)
         {
+          usb_serial_jtag_ll_disable_intr_mask(
+            USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
+          return;
+        }
+
+      if (usb_serial_jtag_ll_txfifo_writable())
+        {
+          /* Complete a preceding 64-byte USB transaction with a ZLP. */
+
           usb_serial_jtag_ll_txfifo_flush();
+          usb_serial_jtag_ll_disable_intr_mask(
+            USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
+        }
+      else
+        {
+          /* A full endpoint needs one more IN_EMPTY callback to send its
+           * terminating zero-length packet.
+           */
+
+          usb_serial_jtag_ll_ena_intr_mask(
+            USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
         }
     }
 }
@@ -497,7 +567,7 @@ static bool esp_txready(struct uart_dev_s *dev)
 {
   struct esp_priv_s *priv = dev->priv;
 
-  if (!esp_connected(priv))
+  if (priv->drop_tx || !priv->host_active)
     {
       return true;
     }
@@ -517,7 +587,8 @@ static void esp_send(struct uart_dev_s *dev, int ch)
 {
   struct esp_priv_s *priv = dev->priv;
 
-  if (!esp_connected(priv))
+  if (priv->drop_tx || !priv->host_active ||
+      !usb_serial_jtag_ll_txfifo_writable())
     {
       return;
     }
