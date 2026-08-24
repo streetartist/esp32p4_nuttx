@@ -27,7 +27,6 @@
  * Included Files
  ****************************************************************************/
 
-#include <stdbool.h>
 #include <nuttx/serial/serial.h>
 
 /****************************************************************************
@@ -39,17 +38,6 @@ extern uart_dev_t g_uart_usbserial;
 /****************************************************************************
  * Public Functions Prototypes
  ****************************************************************************/
-
-/****************************************************************************
- * Name: esp_usbserial_connected
- *
- * Description:
- *   Poll whether a USB host is present and update SERIAL_REMOVABLE state.
- *   This function performs no output and does not attach interrupts.
- *
- ****************************************************************************/
-
-bool esp_usbserial_connected(void);
 
 /****************************************************************************
  * Name: esp_usbserial_write

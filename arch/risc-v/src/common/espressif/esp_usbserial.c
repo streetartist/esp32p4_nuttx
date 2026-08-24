@@ -93,8 +93,6 @@ struct esp_priv_s
 static int esp_interrupt(int irq, void *context, void *arg);
 static bool esp_connected(struct esp_priv_s *priv);
 
-extern uart_dev_t g_uart_usbserial;
-
 /* Serial driver methods */
 
 static int  esp_setup(struct uart_dev_s *dev);
@@ -152,9 +150,6 @@ uart_dev_t g_uart_usbserial =
 #else
   .isconsole = false,
 #endif
-#ifdef CONFIG_SERIAL_REMOVABLE
-  .disconnected = true,
-#endif
   .recv =
     {
       .size = ESP_USBCDC_BUFFERSIZE,
@@ -207,10 +202,6 @@ static bool esp_connected(struct esp_priv_s *priv)
     }
 
   connected = priv->connected;
-
-#ifdef CONFIG_SERIAL_REMOVABLE
-  g_uart_usbserial.disconnected = !connected;
-#endif
 
   /* With no host, shut down both console data interrupt sources.  Keep only
    * SOF armed so the first frame from a newly attached host can wake the
@@ -265,9 +256,6 @@ static int esp_interrupt(int irq, void *context, void *arg)
       usb_serial_jtag_ll_clr_intsts_mask(USB_SERIAL_JTAG_INTR_SOF);
       priv->last_sof = clock_systime_ticks();
       priv->connected = true;
-#ifdef CONFIG_SERIAL_REMOVABLE
-      dev->disconnected = false;
-#endif
       usb_serial_jtag_ll_disable_intr_mask(USB_SERIAL_JTAG_INTR_SOF);
       usb_serial_jtag_ll_ena_intr_mask(
         USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT);
@@ -622,21 +610,6 @@ static int esp_ioctl(struct file *filep, int cmd, unsigned long arg)
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: esp_usbserial_connected
- *
- * Description:
- *   Poll USB SOF state without writing data or changing the driver's open
- *   lifecycle.  A late-opening console can use this to refresh its
- *   SERIAL_REMOVABLE state before calling open().
- *
- ****************************************************************************/
-
-bool esp_usbserial_connected(void)
-{
-  return esp_connected(&g_usbserial_priv);
-}
 
 /****************************************************************************
  * Name: esp_usbserial_write
