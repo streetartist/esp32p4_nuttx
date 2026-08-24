@@ -25,6 +25,10 @@ include common/espressif/Make.defs
 
 CHIP_CSRCS += esp_chip_rev.c
 
+ifeq ($(CONFIG_SMP),y)
+CHIP_CSRCS += esp32p4_smp.c
+endif
+
 CFLAGS += ${DEFINE_PREFIX}_RETARGETABLE_LOCKING
 
 # TODO: Remove these flags once ulp/lp_core/lp_core.c is updated.

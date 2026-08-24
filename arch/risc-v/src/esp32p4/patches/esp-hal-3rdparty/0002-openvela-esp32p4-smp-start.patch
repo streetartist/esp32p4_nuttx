@@ -1,0 +1,114 @@
+diff --git a/nuttx/esp32p4/include/sdkconfig.h b/nuttx/esp32p4/include/sdkconfig.h
+index 0e467acbb88..607b9c4a352 100644
+--- a/nuttx/esp32p4/include/sdkconfig.h
++++ b/nuttx/esp32p4/include/sdkconfig.h
+@@ -12,12 +12,13 @@
+ #define CONFIG_ESP_TIMER_TASK_AFFINITY 0
+ #define CONFIG_ESP_TIMER_INTERRUPT_LEVEL 1
+
++#define CONFIG_ESP_SYSTEM_SINGLE_CORE_MODE 1
++
+ #ifdef CONFIG_SMP
+-#  define CONFIG_FREERTOS_NUMBER_OF_CORES 2
+ #  define CONFIG_ESP_IPC_ENABLE 1
+ #  define CONFIG_ESP_IPC_TASK_STACK_SIZE 1280
++#  define CONFIG_FREERTOS_NUMBER_OF_CORES 2
+ #else
+-#  define CONFIG_ESP_SYSTEM_SINGLE_CORE_MODE 1
+ #  define CONFIG_FREERTOS_UNICORE 1
+ #  define CONFIG_FREERTOS_NUMBER_OF_CORES 1
+ #endif
+@@ -530,7 +531,11 @@
+ #define CONFIG_APP_RETRIEVE_LEN_ELF_SHA 9
+
+ #define CONFIG_PM_CPU_RETENTION_DYNAMIC 1
+-#define CONFIG_PM_ESP_SLEEP_POWER_DOWN_CPU 1
++#ifdef CONFIG_PM
++#  define CONFIG_PM_ESP_SLEEP_POWER_DOWN_CPU 1
++#else
++#  define CONFIG_PM_ESP_SLEEP_POWER_DOWN_CPU 0
++#endif
+ #define CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP 1
+
+ #define CONFIG_ESP_ENABLE_PVT 1
+diff --git a/nuttx/src/platform/os.c b/nuttx/src/platform/os.c
+index f2e3cea8332..15b186ec428 100644
+--- a/nuttx/src/platform/os.c
++++ b/nuttx/src/platform/os.c
+@@ -1115,7 +1115,11 @@ void nuttx_enter_critical(void)
+
+   flags = up_irq_save();
+
++#ifdef CONFIG_IDF_TARGET_ARCH_RISCV
++  __asm__ __volatile__("csrr %0, mhartid" : "=r"(cpu));
++#else
+   cpu = this_cpu();
++#endif
+
+   if (g_int_flags_count[cpu] == 0)
+     {
+@@ -1133,7 +1137,10 @@ void nuttx_enter_critical(void)
+
+ #if OS_SPINLOCK == 1
+ #  ifdef CONFIG_SPINLOCK
+-  rspin_lock(lock);
++  if (OSINIT_OS_READY())
++    {
++      rspin_lock(lock);
++    }
+ #  endif
+ #endif
+
+@@ -1161,13 +1168,22 @@ void nuttx_exit_critical(FAR rspinlock_t *lock)
+ void nuttx_exit_critical(void)
+ #endif
+ {
+-  int cpu = this_cpu();
++  int cpu;
++
++#ifdef CONFIG_IDF_TARGET_ARCH_RISCV
++  __asm__ __volatile__("csrr %0, mhartid" : "=r"(cpu));
++#else
++  cpu = this_cpu();
++#endif
+
+   g_int_flags_count[cpu]--;
+
+ #if OS_SPINLOCK == 1
+ #  ifdef CONFIG_SPINLOCK
+-  rspin_unlock(lock);
++  if (OSINIT_OS_READY())
++    {
++      rspin_unlock(lock);
++    }
+ #  endif
+ #endif
+
+diff --git a/components/esp_hw_support/port/esp32p4/rtc_time.c b/components/esp_hw_support/port/esp32p4/rtc_time.c
+index fec13d07a3a..6d7ca4e8115 100644
+--- a/components/esp_hw_support/port/esp32p4/rtc_time.c
++++ b/components/esp_hw_support/port/esp32p4/rtc_time.c
+@@ -227,9 +227,15 @@ uint32_t rtc_clk_freq_cal(uint32_t cal_val)
+ uint32_t rtc_clk_freq_to_period(uint32_t) __attribute__((alias("rtc_clk_freq_cal")));
+
+ /// @brief if the calibration is used, we need to enable the timer group0 first
++static bool s_timer_group0_calibration_initialized;
++
+ __attribute__((constructor))
+-static void enable_timer_group0_for_calibration(void)
++void rtc_clk_calibration_init(void)
+ {
++    if (s_timer_group0_calibration_initialized) {
++        return;
++    }
++
+ #ifndef BOOTLOADER_BUILD
+     PERIPH_RCC_ACQUIRE_ATOMIC(PERIPH_TIMG0_MODULE, ref_count) {
+         if (ref_count == 0) {
+@@ -241,4 +247,6 @@ static void enable_timer_group0_for_calibration(void)
+     _timg_ll_enable_bus_clock(0, true);
+     _timg_ll_reset_register(0);
+ #endif
++
++    s_timer_group0_calibration_initialized = true;
+ }

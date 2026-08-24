@@ -69,6 +69,14 @@
 
 void riscv_cpu_boot(int cpu)
 {
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  /* CPU1 waits for the P4 FROM_CPU boot handshake before installing its
+   * interrupt route, whose allocator requires the initialized kernel heap.
+   */
+
+  esp_ipi_wait(cpu);
+  esp_ipi_initialize(cpu);
+#else
   /* Clear IPI for CPU(cpu) */
 
   riscv_ipi_clear(cpu);
@@ -84,6 +92,7 @@ void riscv_cpu_boot(int cpu)
       asm("WFI");
     }
   while (!(READ_CSR(CSR_IP) & IP_SIP));
+#endif
 
 #ifdef CONFIG_RISCV_PERCPU_SCRATCH
   /* Initialize the per CPU areas */
@@ -123,7 +132,9 @@ void riscv_cpu_boot(int cpu)
   sched_note_cpu_started(this_task());
 #endif
 
+#ifndef CONFIG_ARCH_CHIP_ESP32P4
   riscv_timer_secondary_init();
+#endif
 
   up_irq_enable();
 
@@ -167,6 +178,10 @@ int up_cpu_start(int cpu)
   /* Notify of the start event */
 
   sched_note_cpu_start(this_task(), cpu);
+#endif
+
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  esp_smp_start_secondary(cpu);
 #endif
 
   /* Send IPI to CPU(cpu) */

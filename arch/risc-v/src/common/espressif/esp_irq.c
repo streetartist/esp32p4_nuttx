@@ -38,6 +38,7 @@
 #include "irq/irq.h"
 
 #include "riscv_internal.h"
+#include "chip.h"
 
 #include "esp_gpio.h"
 #include "esp_irq.h"
@@ -311,6 +312,12 @@ void up_irqinitialize(void)
   /* Attach the common interrupt handler */
 
   riscv_exception_attach();
+
+#if defined(CONFIG_ARCH_CHIP_ESP32P4) && defined(CONFIG_SMP)
+  /* Route CPU0's FROM_CPU interrupt before global interrupts are enabled. */
+
+  esp_ipi_initialize(0);
+#endif
 
 #ifndef CONFIG_SUPPRESS_INTERRUPTS
 

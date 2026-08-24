@@ -289,6 +289,12 @@ ifneq ($(USE_NXTMPDIR_ESP_REPO_DIRECTLY),y)
 	$(Q) echo "Espressif HAL for 3rd Party Platforms: ${ESP_HAL_3RDPARTY_VERSION}"
 	$(Q) git -C chip/$(ESP_HAL_3RDPARTY_REPO) checkout --quiet $(ESP_HAL_3RDPARTY_VERSION)
 	$(Q) git -C chip/$(ESP_HAL_3RDPARTY_REPO) submodule --quiet update --init $(GIT_DEPTH_PARAMETER) components/mbedtls/mbedtls
+	$(Q) if test -d chip/patches/$(ESP_HAL_3RDPARTY_REPO); then \
+		echo "Espressif HAL for 3rd Party Platforms: applying chip patches..."; \
+		git -C chip/$(ESP_HAL_3RDPARTY_REPO) apply \
+		  $(CURDIR)/chip/patches/$(ESP_HAL_3RDPARTY_REPO)/*.patch || \
+		  { rm -rf $(CURDIR)/$@; exit 1; }; \
+	fi
 endif
 ifeq ($(CONFIG_ESPRESSIF_WIRELESS),y)
 ifneq ($(USE_NXTMPDIR_ESP_REPO_DIRECTLY),y)

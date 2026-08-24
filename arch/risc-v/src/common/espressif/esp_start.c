@@ -52,6 +52,9 @@
 #include "hal/cache_ll.h"
 #include "hal/cache_hal.h"
 #include "hal/rwdt_ll.h"
+#if defined(CONFIG_ARCH_CHIP_ESP32P4) && defined(CONFIG_SMP)
+#  include "hal/crosscore_int_ll.h"
+#endif
 #include "soc/ext_mem_defs.h"
 #include "soc/reg_base.h"
 #include "spi_flash_mmap.h"
@@ -482,6 +485,15 @@ void __esp_start(void)
 {
   esp_err_t ret;
 
+#if defined(CONFIG_ARCH_CHIP_ESP32P4) && defined(CONFIG_SMP)
+  /* Discard level-sensitive FROM_CPU latches left by an earlier reset.
+   * CPU1's real boot handshake is triggered later by up_cpu_start().
+   */
+
+  crosscore_int_ll_clear_interrupt(0);
+  crosscore_int_ll_clear_interrupt(1);
+#endif
+
   esp_cpu_intr_set_ivt_addr(&_vector_table);
 
 #if SOC_INT_CLIC_SUPPORTED
@@ -592,6 +604,12 @@ void __esp_start(void)
   /* Configures the CPU clock, RTC slow and fast clocks, and performs
    * RTC slow clock calibration.
    */
+
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  extern void rtc_clk_calibration_init(void);
+
+  rtc_clk_calibration_init();
+#endif
 
   esp_clk_init();
 

@@ -25,6 +25,10 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../common/espressif espressif)
 
 set(SRCS esp_chip_rev.c)
 
+if(CONFIG_SMP)
+  list(APPEND SRCS esp32p4_smp.c)
+endif()
+
 target_compile_definitions(arch PRIVATE _RETARGETABLE_LOCKING)
 target_compile_options(arch PRIVATE -Wno-array-bounds -Wno-stringop-overflow)
 

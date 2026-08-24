@@ -37,7 +37,9 @@
 
 static inline void riscv_ipi_send(int cpu)
 {
-#if defined(CONFIG_ARCH_USE_S_MODE)
+#if defined(CONFIG_ARCH_CHIP_ESP32P4)
+  esp_ipi_send(cpu);
+#elif defined(CONFIG_ARCH_USE_S_MODE)
   riscv_sbi_send_ipi(0x1, riscv_cpuid_to_hartid(cpu));
 #elif defined(RISCV_IPI)
   putreg32(1, (uintptr_t)RISCV_IPI + (4 * riscv_cpuid_to_hartid(cpu)));
@@ -48,7 +50,9 @@ static inline void riscv_ipi_send(int cpu)
 
 static inline void riscv_ipi_clear(int cpu)
 {
-#if defined(CONFIG_ARCH_USE_S_MODE)
+#if defined(CONFIG_ARCH_CHIP_ESP32P4)
+  esp_ipi_clear(cpu);
+#elif defined(CONFIG_ARCH_USE_S_MODE)
   CLEAR_CSR(CSR_IP, IP_SIP);
 #elif defined(RISCV_IPI)
   putreg32(0, (uintptr_t)RISCV_IPI + (4 * riscv_cpuid_to_hartid(cpu)));
