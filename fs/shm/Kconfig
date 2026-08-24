@@ -1,0 +1,32 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+config FS_SHMFS
+	bool "Shared memory support"
+	default n
+	select ARCH_VMA_MAPPING if BUILD_KERNEL
+	---help---
+		Include support for shm_open() and shm_close.
+
+if FS_SHMFS
+
+config FS_SHMFS_VFS_PATH
+	string "Path to shared memory object storage"
+	default "/var/shm"
+	---help---
+		The path to where shared memory objects will exist in the VFS
+		namespace.
+
+config FS_SHMFS_NO_ALIGN
+	bool "Skip cache-line alignment/padding of shm objects"
+	default n
+	---help---
+		Skip cache-line alignment of the shm object metadata header and
+		the object length. Saves RAM in FLAT builds where shm objects
+		are never used as DMA targets and no cache maintenance is
+		performed on their contents. Callers that need DMA-safe shm
+		buffers must not enable this.
+
+endif # FS_SHMFS
