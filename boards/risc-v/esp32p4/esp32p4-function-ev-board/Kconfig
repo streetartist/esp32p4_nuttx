@@ -1,0 +1,32 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
+
+config ESP32P4_FUNCTION_EV_BOARD_LCD
+	bool "EK79007 MIPI-DSI LCD and /dev/fb0"
+	depends on ESPRESSIF_SPIRAM
+	select BOARD_EARLY_INITIALIZE
+	select ESPRESSIF_MIPI_DSI
+	select VIDEO_FB
+	select FB_UPDATE
+	---help---
+		Initialize the Function EV Board 7-inch 1024x600 EK79007 panel,
+		allocate an RGB565 framebuffer from PSRAM, expose /dev/fb0, and
+		show a rainbow test pattern during board bring-up.
+
+		This deliberately does not enable touch or a GUI framework.
+
+config ESP32P4_FUNCTION_EV_BOARD_TOUCHSCREEN
+	bool "GT911 capacitive touchscreen and /dev/input0"
+	depends on ESP32P4_FUNCTION_EV_BOARD_LCD
+	select ESPRESSIF_I2C0
+	select INPUT
+	select INPUT_GT9XX
+	---help---
+		Register the 7-inch panel's GT911 controller on I2C0 as
+		/dev/input0.  The GUI polls the device, matching the vendor BSP.
+
+endif # ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD

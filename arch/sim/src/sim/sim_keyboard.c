@@ -1,0 +1,345 @@
+/****************************************************************************
+ * arch/sim/src/sim/sim_keyboard.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
+#include <nuttx/config.h>
+#include <sys/types.h>
+
+#include <assert.h>
+#include <nuttx/ascii.h>
+#include <nuttx/debug.h>
+#include <string.h>
+
+#include <nuttx/input/keyboard.h>
+#include <nuttx/input/kbd_codec.h>
+
+#include "sim_internal.h"
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+#define DEVNAME "/dev/kbd"
+
+/****************************************************************************
+ * Private Types
+ ****************************************************************************/
+
+struct sim_dev_s
+{
+  int eventloop;
+  struct keyboard_lowerhalf_s lower;
+};
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+/* Only one simulated keyboard is supported so the driver state
+ * structure may as well be pre-allocated.
+ */
+
+static struct sim_dev_s g_simkeyboard;
+
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: translate_x11_ascii
+ *
+ * Description:
+ *   Translate the X11 key codes that stand for an ASCII control character
+ *   rather than for a special key.  Escape and Tab have no keycode in
+ *   enum kbd_keycode_e because they need none:  they are characters, and
+ *   an application looks for them as such.
+ *
+ * Returns: The character, or zero if this key is not one of them.
+ ****************************************************************************/
+
+static uint32_t translate_x11_ascii(uint32_t code)
+{
+  switch (code)
+    {
+    case XK_Escape:
+      return ASCII_ESC;
+    case XK_Tab:
+      return ASCII_TAB;
+    default:
+      return 0;
+    }
+}
+
+/****************************************************************************
+ * Name: translate_x11_key
+ *
+ * Description:
+ *   Translate X11 key codes into the NuttX keyboard codec so that
+ *   applications can actually rely on the output of the keyboard driver.
+ *   Some X11 key codes do not need translation.
+ *
+ * Returns: The translated key code.
+ ****************************************************************************/
+
+static uint32_t translate_x11_key(uint32_t code)
+{
+  switch (code)
+    {
+    case XK_Delete:
+      return KEYCODE_FWDDEL;
+    case XK_BackSpace:
+      return KEYCODE_BACKDEL;
+
+      /* Cursor movement */
+
+    case XK_Home:
+      return KEYCODE_HOME;
+    case XK_End:
+      return KEYCODE_END;
+    case XK_Left:
+      return KEYCODE_LEFT;
+    case XK_Right:
+      return KEYCODE_RIGHT;
+    case XK_Up:
+      return KEYCODE_UP;
+    case XK_Down:
+      return KEYCODE_DOWN;
+    case XK_Page_Up:
+      return KEYCODE_PAGEUP;
+    case XK_Page_Down:
+      return KEYCODE_PAGEDOWN;
+
+      /* Edit commands */
+
+    case XK_Insert:
+      return KEYCODE_INSERT;
+    case XK_Undo:
+      return KEYCODE_UNDO;
+    case XK_Redo:
+      return KEYCODE_REDO;
+    case XK_Find:
+      return KEYCODE_FIND;
+
+      /* Selection codes */
+
+    case XK_Return:
+    case XK_KP_Enter:
+      return KEYCODE_ENTER;
+    case XK_Select:
+      return KEYCODE_SELECT;
+    case XK_Execute:
+      return KEYCODE_EXECUTE;
+
+      /* Keyboard modes */
+
+    case XK_Caps_Lock:
+      return KEYCODE_CAPSLOCK;
+    case XK_Scroll_Lock:
+      return KEYCODE_SCROLLLOCK;
+    case XK_Num_Lock:
+      return KEYCODE_NUMLOCK;
+
+      /* Misc control codes */
+
+    case XK_Help:
+      return KEYCODE_HELP;
+    case XK_Menu:
+      return KEYCODE_MENU;
+    case XK_Pause:
+      return KEYCODE_PAUSE;
+    case XK_Break:
+      return KEYCODE_BREAK;
+    case XK_Cancel:
+      return KEYCODE_CANCEL;
+    case XK_Print:
+      return KEYCODE_PRTSCRN;
+    case XK_Sys_Req:
+      return KEYCODE_SYSREQ;
+
+      /* Context-specific function keys */
+
+      /* Modifier keys.  These produce no character of their own, so an
+       * application that wants to know that one is held down has no other
+       * way to find out.
+       */
+
+    case XK_Shift_L:
+      return KEYCODE_LSHIFT;
+    case XK_Shift_R:
+      return KEYCODE_RSHIFT;
+    case XK_Control_L:
+      return KEYCODE_LCTRL;
+    case XK_Control_R:
+      return KEYCODE_RCTRL;
+    case XK_Alt_L:
+      return KEYCODE_LALT;
+    case XK_Alt_R:
+      return KEYCODE_RALT;
+    case XK_Super_L:
+      return KEYCODE_LGUI;
+    case XK_Super_R:
+      return KEYCODE_RGUI;
+
+    case XK_F1:
+      return KEYCODE_F1;
+    case XK_F2:
+      return KEYCODE_F2;
+    case XK_F3:
+      return KEYCODE_F3;
+    case XK_F4:
+      return KEYCODE_F4;
+    case XK_F5:
+      return KEYCODE_F5;
+    case XK_F6:
+      return KEYCODE_F6;
+    case XK_F7:
+      return KEYCODE_F7;
+    case XK_F8:
+      return KEYCODE_F8;
+    case XK_F9:
+      return KEYCODE_F9;
+    case XK_F10:
+      return KEYCODE_F10;
+    case XK_F11:
+      return KEYCODE_F11;
+    case XK_F12:
+      return KEYCODE_F12;
+    case XK_F13:
+      return KEYCODE_F13;
+    case XK_F14:
+      return KEYCODE_F14;
+    case XK_F15:
+      return KEYCODE_F15;
+    case XK_F16:
+      return KEYCODE_F16;
+    case XK_F17:
+      return KEYCODE_F17;
+    case XK_F18:
+      return KEYCODE_F18;
+    case XK_F19:
+      return KEYCODE_F19;
+    case XK_F20:
+      return KEYCODE_F20;
+    case XK_F21:
+      return KEYCODE_F21;
+    case XK_F22:
+      return KEYCODE_F22;
+    case XK_F23:
+      return KEYCODE_F23;
+    case XK_F24:
+      return KEYCODE_F24;
+
+    default:
+      return KEYCODE_NORMAL;
+    }
+}
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: sim_kbd_initialize
+ ****************************************************************************/
+
+int sim_kbd_initialize(void)
+{
+  int              ret;
+  struct sim_dev_s *priv = &g_simkeyboard;
+
+  memset(priv, 0, sizeof(*priv));
+
+  /* Register the device as an input device */
+
+  ret = keyboard_register(&priv->lower, DEVNAME,
+                          CONFIG_SIM_KEYBOARD_BUFFSIZE);
+  if (ret < 0)
+    {
+      ierr("ERROR: keyboard_register() failed: %d\n", ret);
+      return ret;
+    }
+
+  /* Enable X11 event processing from the IDLE loop */
+
+  priv->eventloop = 1;
+  return OK;
+}
+
+/****************************************************************************
+ * Name: sim_kbdevent
+ ****************************************************************************/
+
+void sim_kbdevent(uint32_t key, bool is_press)
+{
+  uint32_t trans_key;
+  bool is_special;
+  struct sim_dev_s *priv = (struct sim_dev_s *) &g_simkeyboard;
+  static const uint32_t types[2][2] =
+    {
+      {
+        KEYBOARD_RELEASE, KEYBOARD_PRESS
+      },
+      {
+        KBD_SPECREL, KBD_SPECPRESS
+      }
+    };
+
+  if (priv->eventloop == 0)
+    {
+      return;
+    }
+
+  iinfo("key=%04x\n", key);
+
+  /* A few keysyms are control characters rather than special keys, and an
+   * application expects them as the character.
+   */
+
+  trans_key = translate_x11_ascii(key);
+  if (trans_key != 0)
+    {
+      keyboard_event(&priv->lower, trans_key, types[0][is_press]);
+      return;
+    }
+
+  trans_key = translate_x11_key(key);
+  is_special = trans_key != KEYCODE_NORMAL;
+
+  /* A keysym outside the Latin-1 range that no table knows about is not a
+   * character.  Reporting it as one would hand the application a value
+   * such as 65307 where it expects a byte of text.
+   */
+
+  if (!is_special && key > 0xff)
+    {
+      return;
+    }
+
+  trans_key = is_special ? trans_key : key;
+
+  /* Report data changes */
+
+  keyboard_event(&priv->lower, trans_key, types[is_special][is_press]);
+}
