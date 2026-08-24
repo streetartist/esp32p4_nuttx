@@ -122,8 +122,10 @@
 #endif /* CONSOLE_UART */
 
 #ifdef CONFIG_ESPRESSIF_USBSERIAL
-#  define CONSOLE_DEV           g_uart_usbserial
 #  define TTYACM0_DEV           g_uart_usbserial
+#  ifdef CONFIG_ESPRESSIF_USBSERIAL_CONSOLE
+#    define CONSOLE_DEV         g_uart_usbserial
+#  endif
 #endif
 
 /* Pick ttyS1 */

@@ -612,6 +612,31 @@ config INPUT_GT9XX
 
 if INPUT_GT9XX
 
+choice
+	prompt "Preferred GT9xx I2C 7-bit address"
+	default INPUT_GT9XX_ADDR_5D
+
+config INPUT_GT9XX_ADDR_5D
+	bool "0x5d (INT low at reset)"
+
+config INPUT_GT9XX_ADDR_14
+	bool "0x14 (INT high at reset)"
+
+endchoice
+
+config INPUT_GT9XX_I2C_ADDR
+	hex
+	default 0x5d if INPUT_GT9XX_ADDR_5D
+	default 0x14 if INPUT_GT9XX_ADDR_14
+
+config INPUT_GT9XX_X_INVERT_MAX
+	int "Mirror X coordinates against this panel width (0 = disabled)"
+	default 0
+
+config INPUT_GT9XX_Y_INVERT_MAX
+	int "Mirror Y coordinates against this panel height (0 = disabled)"
+	default 0
+
 config INPUT_GT9XX_NPOLLWAITERS
 	int "Number of waiters to poll"
 	default 1

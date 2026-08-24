@@ -352,7 +352,9 @@ bool esp_lowputc_uart_module_enable(const struct esp_uart_s *priv)
               uart_ll_enable_bus_clock(uart_num, true);
             }
 
+#ifdef HAVE_SERIAL_CONSOLE
           if (uart_num != CONFIG_ESP_CONSOLE_UART_NUM)
+#endif
             {
               PERIPH_RCC_ATOMIC()
                 {

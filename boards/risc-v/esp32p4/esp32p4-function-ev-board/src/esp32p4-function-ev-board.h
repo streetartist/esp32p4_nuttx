@@ -132,5 +132,13 @@ int esp_gpio_init(void);
 int board_emac_init(void);
 #endif
 
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_LCD
+int esp32p4_lcd_show_rainbow(void);
+#endif
+
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_TOUCHSCREEN
+int board_touch_initialize(void);
+#endif
+
 #endif /* __ASSEMBLY__ */
 #endif /* __BOARDS_RISCV_ESP32P4_ESP32P4_FUNCTION_EV_BOARD_SRC_ESP32P4_FUNCTION_EV_BOARD_H */

@@ -26,6 +26,10 @@
 
 #include <nuttx/config.h>
 
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_LCD
+#  include <nuttx/video/fb.h>
+#endif
+
 #include "esp32p4-function-ev-board.h"
 
 /****************************************************************************
@@ -60,6 +64,31 @@
 void esp_board_initialize(void)
 {
 }
+
+/****************************************************************************
+ * Name: board_early_initialize
+ *
+ * Description:
+ *   Initialize the display after NuttX drivers and heaps are available but
+ *   before the idle task opens the USB Serial/JTAG console.  The USB console
+ *   may wait for a host, while the startup display must be autonomous.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_BOARD_EARLY_INITIALIZE
+void board_early_initialize(void)
+{
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_LCD
+  if (fb_register(0, 0) >= 0)
+    {
+      /* fb_register() clears the plane after up_fbinitialize(). */
+
+      esp32p4_lcd_show_rainbow();
+    }
+#endif
+
+}
+#endif
 
 /****************************************************************************
  * Name: board_late_initialize

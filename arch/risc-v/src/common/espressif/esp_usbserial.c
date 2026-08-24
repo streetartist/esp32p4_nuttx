@@ -133,7 +133,11 @@ static struct uart_ops_s g_uart_ops =
 
 uart_dev_t g_uart_usbserial =
 {
+#ifdef CONFIG_ESPRESSIF_USBSERIAL_CONSOLE
   .isconsole = true,
+#else
+  .isconsole = false,
+#endif
   .recv =
     {
       .size = ESP_USBCDC_BUFFERSIZE,
@@ -477,7 +481,17 @@ static int esp_ioctl(struct file *filep, int cmd, unsigned long arg)
 
 void esp_usbserial_write(char ch)
 {
-  while (!esp_txready(&g_uart_usbserial));
+  /* USB-Serial/JTAG stops draining its small TX FIFO when no host has the
+   * port open.  The low-level console path must never wait indefinitely:
+   * a late syslog call would otherwise freeze an otherwise healthy system.
+   * Drop the character while disconnected/full; normal interrupt-driven
+   * /dev/console writes retain their usual buffering semantics.
+   */
+
+  if (!esp_txready(&g_uart_usbserial))
+    {
+      return;
+    }
 
   esp_send(&g_uart_usbserial, ch);
 }

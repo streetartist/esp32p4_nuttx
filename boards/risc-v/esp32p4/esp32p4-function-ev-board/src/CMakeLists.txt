@@ -40,6 +40,14 @@ if(CONFIG_ESPRESSIF_EMAC)
   list(APPEND SRCS esp32p4_ethernet.c)
 endif()
 
+if(CONFIG_ESP32P4_FUNCTION_EV_BOARD_LCD)
+  list(APPEND SRCS esp32p4_lcd.c)
+endif()
+
+if(CONFIG_ESP32P4_FUNCTION_EV_BOARD_TOUCHSCREEN)
+  list(APPEND SRCS esp32p4_touch.c)
+endif()
+
 target_sources(board PRIVATE ${SRCS})
 
 # ##############################################################################

@@ -1660,6 +1660,15 @@ config ESPRESSIF_USBSERIAL
 	select OTHER_UART_SERIALDRIVER
 	select ARCH_HAVE_SERIAL_TERMIOS
 
+config ESPRESSIF_USBSERIAL_CONSOLE
+	bool "Use USB-Serial-JTAG as /dev/console"
+	default y
+	depends on ESPRESSIF_USBSERIAL
+	---help---
+		Select this for the historical behavior where USB-Serial-JTAG is
+		both /dev/ttyACM0 and /dev/console.  Disable it for autonomous GUI
+		startup while retaining /dev/ttyACM0 as an ordinary serial device.
+
 config ESPRESSIF_DEDICATED_GPIO
 	bool "Dedicated GPIO"
 	default n
