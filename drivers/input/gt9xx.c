@@ -440,12 +440,13 @@ static int gt9xx_read_touch_data(FAR struct gt9xx_dev_s *dev,
 
   if (status_code == 0)
     {
-      /* Match Espressif's official GT911 driver: clear the coordinate
-       * status register on every idle poll as well as after data frames.
+      /* The ready bit only says whether a new coordinate frame is waiting.
+       * It is normally clear while a stationary finger remains down after
+       * the previous frame was acknowledged.  Preserve the tracked contact
+       * until the controller publishes a ready frame with zero points.
        */
 
-      gt9xx_set_status(dev, 0);
-      return OK;
+      return -EAGAIN;
     }
 
   if (touched_points == 0 || touched_points > 5)
