@@ -50,6 +50,7 @@
 #include "esp_rom_sys.h"
 #include "riscv/interrupt.h"
 #include "soc/soc.h"
+#include "soc/interrupts.h"
 
 #if SOC_INT_CLIC_SUPPORTED
 #  include "hal/interrupt_clic_ll.h"
@@ -71,6 +72,13 @@
 #else
 #  define ESP_NCPUS                     1
 #endif
+
+/* CPU interrupt the ESP-IDF allocator reserves as its "permanently disabled"
+ * sink (INT_MUX_DISABLED_INTNO).  Routing a peripheral there detaches it
+ * without leaving it asserted on a live line.
+ */
+
+#define ESP_INTR_DISABLED_INTNO         6
 
 #ifdef CONFIG_ARCH_MINIMAL_VECTORTABLE_DYNAMIC
 #  ifndef CONFIG_ARCH_IRQ_TO_NDX
@@ -285,6 +293,33 @@ void up_irqinitialize(void)
   int i;
   int j;
 
+  /* Retire interrupt routings left behind by the ROM bootloader.
+   *
+   * The ROM routes UART0 to a CPU interrupt for its own boot log and leaves
+   * it enabled.  esp_intr_alloc() has no idea that line is taken, so it
+   * hands the same CPU interrupt out to the next driver that asks - here the
+   * I2C controller - and the two sources end up sharing one line.  When
+   * UART0 then asserts (on the Function EV Board its pins are driven by the
+   * on-board USB-UART bridge as soon as the cable is plugged into a host),
+   * riscv_dispatch_irq() resolves the line to the I2C IRQ, the I2C handler
+   * clears only I2C state, UART0 stays asserted and the core live-locks in
+   * the trap before the desktop ever draws.
+   *
+   * Park the source on INT_MUX_DISABLED_INTNO (CPU interrupt 6), which the
+   * ESP-IDF interrupt allocator reserves precisely for this purpose - see
+   * esp_cpu_intr_get_desc() for the ESP32-P4.  Only sources NuttX has no
+   * driver for are listed, so nothing that is about to be registered can be
+   * disturbed.
+   */
+
+  for (j = 0; j < CONFIG_SMP_NCPUS; j++)
+    {
+#ifndef CONFIG_ESPRESSIF_UART0
+      esp_rom_route_intr_matrix(j, ETS_UART0_INTR_SOURCE,
+                                ESP_INTR_DISABLED_INTNO);
+#endif
+    }
+
   /* Indicate that no interrupt sources are assigned to CPU interrupts */
 
   for (i = 0; i < NR_IRQS; i++)
@@ -457,6 +492,7 @@ int esp_setup_irq_with_flags_intrstatus(int source,
   struct intr_adapter_from_nuttx *isr_adapter_args;
   esp_err_t ret;
   intr_handle_t ret_handle;
+  irqstate_t irqstate;
   int cpuint;
   int irq;
 
@@ -472,6 +508,15 @@ int esp_setup_irq_with_flags_intrstatus(int source,
   isr_adapter_args->func = handler;
   isr_adapter_args->arg = arg;
 
+  /* esp_intr_alloc_intrstatus() routes and enables the source before it
+   * returns, but g_handle_map is only updated further down.  A peripheral
+   * with an already pending interrupt would therefore fire while the map is
+   * still empty, and riscv_dispatch_irq() would find no IRQ for it.  Keep
+   * interrupts disabled until the mapping is in place.
+   */
+
+  irqstate = enter_critical_section();
+
   ret = esp_intr_alloc_intrstatus(source,
                                   flags,
                                   intrstatusreg,
@@ -481,6 +526,7 @@ int esp_setup_irq_with_flags_intrstatus(int source,
                                   &ret_handle);
   if (ret != ESP_OK)
     {
+      leave_critical_section(irqstate);
       irqerr("Failed to allocate interrupt for source %d\n", source);
       kmm_free(isr_adapter_args);
       return -EINVAL;
@@ -502,6 +548,8 @@ int esp_setup_irq_with_flags_intrstatus(int source,
    */
 
   esp_set_handle(this_cpu(), irq, ret_handle);
+
+  leave_critical_section(irqstate);
 
   return cpuint;
 }
@@ -582,11 +630,38 @@ IRAM_ATTR void *riscv_dispatch_irq(uintreg_t mcause, uintreg_t *regs)
 
       if (irq < 0)
         {
-          /* No handle found for this CPU interrupt. This can happen
-           * if the interrupt was triggered but not properly registered.
+          /* No IRQ is mapped to this CPU interrupt.  Returning without
+           * touching the controller leaves the source asserted, so the trap
+           * re-enters immediately and the core spins forever.
+           *
+           * esp_setup_irq() keeps g_handle_map consistent under a critical
+           * section, so a registered driver cannot land here.  What does is
+           * a source nobody owns: the ROM bootloader leaves UART0 routed and
+           * enabled for its own boot log, and on the Function EV Board the
+           * on-board USB-UART bridge drives those pins whenever the cable is
+           * plugged into a host.
+           *
+           * Acknowledge it, and mask the CPU interrupt when no handler is
+           * installed at all.  esp_intr_alloc() installs the handler before
+           * routing and enabling the source, so a NULL handler proves the
+           * interrupt is unowned and masking cannot strand a real driver.
            */
 
-          irqwarn("No IRQ found for cpuint=%d cpu=%d\n", cpuint, cpu);
+          if (esprv_int_get_type(cpuint) == INTR_TYPE_LEVEL)
+            {
+              esp_cpu_intr_edge_ack(cpuint);
+            }
+
+          if (esp_cpu_intr_get_handler(cpuint) == NULL)
+            {
+              esprv_int_disable(1U << cpuint);
+              irqwarn("Unowned cpuint=%d cpu=%d masked\n", cpuint, cpu);
+            }
+          else
+            {
+              irqwarn("No IRQ found for cpuint=%d cpu=%d\n", cpuint, cpu);
+            }
+
           return regs;
         }
 

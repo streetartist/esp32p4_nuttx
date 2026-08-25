@@ -1560,6 +1560,16 @@ static int esp_i2c_irq(int cpuint, void *context, void *arg)
   struct esp_i2c_priv_s *priv = (struct esp_i2c_priv_s *)arg;
   uint32_t irq_status = 0;
 
+  /* A pending condition can raise this interrupt before i2c_hal_init() has
+   * published the register block.  Drop it rather than faulting on a NULL
+   * dereference: the peripheral is reset later in esp_i2c_init() anyway.
+   */
+
+  if (priv == NULL || priv->ctx == NULL || priv->ctx->dev == NULL)
+    {
+      return OK;
+    }
+
   i2c_ll_get_intr_mask(priv->ctx->dev, &irq_status);
   i2c_ll_clear_intr_mask(priv->ctx->dev, irq_status);
   esp_i2c_process(priv , irq_status);
@@ -1797,12 +1807,23 @@ struct i2c_master_s *esp_i2cbus_initialize(int port)
       return NULL;
     }
 
+  /* Bring the peripheral up before the interrupt is enabled.  esp_i2c_irq()
+   * dereferences priv->ctx->dev, and that pointer is only established by
+   * i2c_hal_init() inside esp_i2c_init().  Enabling the interrupt first
+   * lets an already pending I2C condition invoke the handler while ctx->dev
+   * is still NULL, which faults on a load from address 0x2c and takes the
+   * whole boot down before the desktop appears.
+   */
+
+  esp_i2c_init(priv);
+
   /* Enable the CPU interrupt that is linked to the I2C device. */
 
   up_enable_irq(ESP_SOURCE2IRQ(i2c_periph_signal[priv->id].irq));
+#else
+  esp_i2c_init(priv);
 #endif
 
-  esp_i2c_init(priv);
   nxmutex_unlock(&priv->lock);
 
   i2cinfo("I2C bus initialized! Handler: %p\n", priv);

@@ -25,6 +25,12 @@ include common/espressif/Make.defs
 
 CHIP_CSRCS += esp_chip_rev.c
 
+ifeq ($(CONFIG_ESP32P4_SDMMC),y)
+CHIP_CSRCS += esp32p4_sdmmc.c
+INCLUDES += $(INCDIR_PREFIX)$(ARCH_SRCDIR)$(DELIM)chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hal_sd$(DELIM)include
+INCLUDES += $(INCDIR_PREFIX)$(ARCH_SRCDIR)$(DELIM)chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hal_sd$(DELIM)esp32p4$(DELIM)include
+endif
+
 ifeq ($(CONFIG_SMP),y)
 CHIP_CSRCS += esp32p4_smp.c
 endif
