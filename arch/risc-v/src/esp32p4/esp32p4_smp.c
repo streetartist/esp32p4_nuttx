@@ -39,6 +39,14 @@ struct esp_ipc_call_s
   void *arg;
 };
 
+struct esp_ipc_async_call_s
+{
+  struct smp_call_data_s data;
+  esp_ipc_func_t func;
+  void *arg;
+  volatile uint32_t pending;
+};
+
 static int esp_ipc_call_adapter(void *arg)
 {
   struct esp_ipc_call_s *call = arg;
@@ -46,6 +54,20 @@ static int esp_ipc_call_adapter(void *arg)
   call->func(call->arg);
   return OK;
 }
+
+static int IRAM_ATTR esp_ipc_call_async_adapter(void *arg)
+{
+  struct esp_ipc_async_call_s *call = arg;
+
+  call->func(call->arg);
+  call->func = NULL;
+  call->arg = NULL;
+  __atomic_store_n(&call->pending, 0, __ATOMIC_RELEASE);
+  return OK;
+}
+
+static struct esp_ipc_async_call_s
+  g_ipc_async_calls[CONFIG_SMP_NCPUS];
 
 static esp_err_t esp_ipc_call_internal(uint32_t cpu_id,
                                        esp_ipc_func_t func, void *arg)
@@ -74,6 +96,39 @@ esp_err_t esp_ipc_call_blocking(uint32_t cpu_id, esp_ipc_func_t func,
                                 void *arg)
 {
   return esp_ipc_call_internal(cpu_id, func, arg);
+}
+
+esp_err_t esp_ipc_call_nonblocking(uint32_t cpu_id, esp_ipc_func_t func,
+                                   void *arg)
+{
+  struct esp_ipc_async_call_s *call;
+  int ret;
+
+  if (cpu_id >= CONFIG_SMP_NCPUS || func == NULL)
+    {
+      return ESP_ERR_INVALID_ARG;
+    }
+
+  call = &g_ipc_async_calls[cpu_id];
+  if (!esp_cpu_compare_and_set(&call->pending, 0, 1))
+    {
+      return ESP_FAIL;
+    }
+
+  call->func = func;
+  call->arg = arg;
+  nxsched_smp_call_init(&call->data, esp_ipc_call_async_adapter, call);
+
+  ret = nxsched_smp_call_single_async(cpu_id, &call->data);
+  if (ret < 0)
+    {
+      call->func = NULL;
+      call->arg = NULL;
+      __atomic_store_n(&call->pending, 0, __ATOMIC_RELEASE);
+      return ESP_FAIL;
+    }
+
+  return ESP_OK;
 }
 
 void esp_ipi_send(int cpu)

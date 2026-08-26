@@ -100,6 +100,7 @@ static int setup_smartfs(int smartn, struct mtd_dev_s *mtd,
   ret = smart_initialize(smartn, mtd, NULL);
   if (ret < 0)
     {
+#ifdef CONFIG_ESPRESSIF_SPIFLASH_SMARTFS_ERASE_ON_INIT_FAILURE
       syslog(LOG_INFO, "smart_initialize failed, "
              "Trying to erase first...\n");
       ret = mtd->ioctl(mtd, MTDIOC_BULKERASE, 0);
@@ -116,6 +117,11 @@ static int setup_smartfs(int smartn, struct mtd_dev_s *mtd,
           syslog(LOG_ERR, "ERROR: smart_initialize failed: %d\n", ret);
           return ret;
         }
+#else
+      syslog(LOG_ERR, "ERROR: smart_initialize failed: %d; "
+             "automatic erase is disabled\n", ret);
+      return ret;
+#endif
     }
 
   if (mnt_pt != NULL)

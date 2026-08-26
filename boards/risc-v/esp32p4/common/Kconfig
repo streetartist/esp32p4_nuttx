@@ -52,6 +52,18 @@ config ESPRESSIF_SPIFLASH_MTD_CONFIG
 
 endchoice # ESPRESSIF_SPIFLASH_FS
 
+config ESPRESSIF_SPIFLASH_SMARTFS_ERASE_ON_INIT_FAILURE
+	bool "Erase SmartFS partition when initialization fails"
+	default y
+	depends on ESPRESSIF_SPIFLASH_SMARTFS
+	---help---
+		Erase the configured storage partition and retry SmartFS
+		initialization when the first initialization attempt fails.
+
+		Disable this option when preserving existing flash contents is more
+		important than automatic recovery. The partition can still be
+		formatted explicitly with mksmartfs.
+
 config ESPRESSIF_SPIFLASH_FS_MOUNT_PT
 	string "File-system Mount Point"
 	depends on ESPRESSIF_SPIFLASH_SMARTFS || ESPRESSIF_SPIFLASH_NXFFS || ESPRESSIF_SPIFLASH_SPIFFS || ESPRESSIF_SPIFLASH_LITTLEFS
