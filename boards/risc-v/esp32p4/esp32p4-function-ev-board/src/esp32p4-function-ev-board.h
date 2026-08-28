@@ -140,5 +140,9 @@ int esp32p4_lcd_show_rainbow(void);
 int board_touch_initialize(void);
 #endif
 
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA
+int board_camera_initialize(void);
+#endif
+
 #endif /* __ASSEMBLY__ */
 #endif /* __BOARDS_RISCV_ESP32P4_ESP32P4_FUNCTION_EV_BOARD_SRC_ESP32P4_FUNCTION_EV_BOARD_H */

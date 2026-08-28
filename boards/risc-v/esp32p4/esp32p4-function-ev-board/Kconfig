@@ -29,4 +29,17 @@ config ESP32P4_FUNCTION_EV_BOARD_TOUCHSCREEN
 		Register the 7-inch panel's GT911 controller on I2C0 as
 		/dev/input0.  The GUI polls the device, matching the vendor BSP.
 
+config ESP32P4_FUNCTION_EV_BOARD_CAMERA
+	bool "SC2336 MIPI-CSI camera and /dev/video0"
+	depends on ESP32P4_FUNCTION_EV_BOARD_LCD
+	select BOARD_EARLY_INITIALIZE
+	select ESPRESSIF_I2C0
+	select ESPRESSIF_LDO
+	select VIDEO
+	select VIDEO_STREAM
+	---help---
+		Register the Function EV Board SC2336 camera through the NuttX
+		V4L2 capture driver as /dev/video0. The sensor uses I2C0 GPIO7/8
+		and the MIPI CSI/ISP pipeline converts RAW10 to RGB565.
+
 endif # ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD

@@ -59,6 +59,13 @@
 
 #include "esp_mipi_dsi.h"
 
+/* Weak default: CSI DW-GDMA provides the real implementation when built. */
+
+void dw_gdma_shared_isr(void) __attribute__((weak));
+void dw_gdma_shared_isr(void)
+{
+}
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -271,6 +278,7 @@ static int IRAM_ATTR esp_mipi_dsi_dma_isr(int irq, FAR void *context,
     }
 
   spin_unlock_irqrestore(&priv->dmalock, flags);
+  dw_gdma_shared_isr();
   return OK;
 }
 

@@ -48,6 +48,10 @@ if(CONFIG_ESP32P4_FUNCTION_EV_BOARD_TOUCHSCREEN)
   list(APPEND SRCS esp32p4_touch.c)
 endif()
 
+if(CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA)
+  list(APPEND SRCS esp32p4_camera.c)
+endif()
+
 target_sources(board PRIVATE ${SRCS})
 
 # ##############################################################################

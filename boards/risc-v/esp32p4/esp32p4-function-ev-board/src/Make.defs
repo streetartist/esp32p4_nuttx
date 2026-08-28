@@ -50,6 +50,25 @@ ifeq ($(CONFIG_ESP32P4_FUNCTION_EV_BOARD_TOUCHSCREEN),y)
   CSRCS += esp32p4_touch.c
 endif
 
+ifeq ($(CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA),y)
+  CSRCS += esp32p4_camera.c
+
+  # Board sources are compiled separately from the chip HAL library, so add
+  # the Espressif camera/ISP public headers to this target explicitly.
+  CAMERA_HAL_DIR = $(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src$(DELIM)chip$(DELIM)esp-hal-3rdparty$(DELIM)components
+  CFLAGS += ${INCDIR_PREFIX}$(CAMERA_HAL_DIR)$(DELIM)upper_hal_cam$(DELIM)include
+  CFLAGS += ${INCDIR_PREFIX}$(CAMERA_HAL_DIR)$(DELIM)upper_hal_cam$(DELIM)csi$(DELIM)include
+  CFLAGS += ${INCDIR_PREFIX}$(CAMERA_HAL_DIR)$(DELIM)upper_hal_isp$(DELIM)include
+  CFLAGS += ${INCDIR_PREFIX}$(CAMERA_HAL_DIR)$(DELIM)upper_hal_isp$(DELIM)include$(DELIM)driver
+  CFLAGS += ${INCDIR_PREFIX}$(CAMERA_HAL_DIR)$(DELIM)esp_hal_cam$(DELIM)include
+  CFLAGS += ${INCDIR_PREFIX}$(CAMERA_HAL_DIR)$(DELIM)esp_hal_cam$(DELIM)esp32p4$(DELIM)include
+  CFLAGS += ${INCDIR_PREFIX}$(CAMERA_HAL_DIR)$(DELIM)hal$(DELIM)include
+  CFLAGS += ${INCDIR_PREFIX}$(CAMERA_HAL_DIR)$(DELIM)esp_common$(DELIM)include
+  CFLAGS += ${INCDIR_PREFIX}$(CAMERA_HAL_DIR)$(DELIM)heap$(DELIM)include
+  CFLAGS += ${INCDIR_PREFIX}$(CAMERA_HAL_DIR)$(DELIM)soc$(DELIM)esp32p4$(DELIM)include
+  CFLAGS += ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src$(DELIM)chip$(DELIM)esp-hal-3rdparty$(DELIM)nuttx$(DELIM)esp32p4$(DELIM)include
+endif
+
 DEPPATH += --dep-path board
 VPATH += :board
 CFLAGS += ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src$(DELIM)board$(DELIM)board
